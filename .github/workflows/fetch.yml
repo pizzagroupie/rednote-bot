@@ -1,0 +1,41 @@
+name: 小红书家装素材抓取
+
+on:
+  # 定时运行：每天UTC时间 0:00 和 12:00（即北京时间 8:00 和 20:00）
+  schedule:
+    - cron: '0 0 * * *'   # 北京时间 08:00
+    - cron: '0 12 * * *'  # 北京时间 20:00
+  
+  # 也可以手动触发（方便测试）
+  workflow_dispatch:
+
+jobs:
+  fetch-and-push:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: pip install feedparser
+      
+      # 从上次运行中恢复历史记录（避免重复推送）
+      - name: Restore history
+        uses: actions/cache@v4
+        with:
+          path: data/sent_history.json
+          key: sent-history-${{ github.run_number }}
+          restore-keys: |
+            sent-history-
+      
+      - name: Run fetcher
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scripts/fetch_and_push.py
