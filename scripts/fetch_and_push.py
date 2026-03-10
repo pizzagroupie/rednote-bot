@@ -1,6 +1,6 @@
 """
 小红书家装素材自动抓取 + Telegram推送
-每天定时从Reddit等RSS源抓取高质量家装图片，推送到Telegram
+带风格关键词过滤、商业内容排除、质量筛选
 """
 
 import feedparser
@@ -15,31 +15,34 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 # ============================================================
-# 配置区域
+# 配置区域 — 所有过滤规则都在这里改
 # ============================================================
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
+# ---- 内容源 ----
+# Reddit用 /top/ 而不是默认的 /hot/，这样拿到的都是高赞内容
+# t=day 表示过去24小时的top帖，t=week 表示过去一周
 RSS_FEEDS = [
     {
         "name": "RoomPorn",
-        "url": "https://www.reddit.com/r/RoomPorn/.rss?limit=25",
+        "url": "https://www.reddit.com/r/RoomPorn/top/.rss?t=day&limit=25",
         "type": "reddit"
     },
     {
         "name": "CozyPlaces",
-        "url": "https://www.reddit.com/r/CozyPlaces/.rss?limit=25",
+        "url": "https://www.reddit.com/r/CozyPlaces/top/.rss?t=day&limit=25",
         "type": "reddit"
     },
     {
         "name": "InteriorDesign",
-        "url": "https://www.reddit.com/r/InteriorDesign/.rss?limit=25",
+        "url": "https://www.reddit.com/r/InteriorDesign/top/.rss?t=day&limit=25",
         "type": "reddit"
     },
     {
         "name": "AmateurRoomPorn",
-        "url": "https://www.reddit.com/r/AmateurRoomPorn/.rss?limit=25",
+        "url": "https://www.reddit.com/r/AmateurRoomPorn/top/.rss?t=day&limit=25",
         "type": "reddit"
     },
     {
@@ -54,8 +57,94 @@ RSS_FEEDS = [
     },
 ]
 
+# ---- 风格关键词过滤（白名单模式，仅对Reddit生效）----
+STYLE_FILTER_REDDIT_ONLY = True  # 只对Reddit源做关键词过滤，博客源全量推送
+
+STYLE_KEYWORDS = [
+    # 北欧/极简系
+    "minimalist", "minimal", "scandinavian", "nordic", "muji", "zen", "clean lines",
+    # 日式/侘寂系
+    "japandi", "japanese", "wabi-sabi", "wabi sabi",
+    # 温馨系
+    "cozy", "cosy", "hygge", "warm", "cottage", "rustic", "farmhouse", "cabin",
+    # 复古/中古系
+    "mid-century", "mid century", "vintage", "retro", "art deco", "bohemian", "boho",
+    # 奶油/法式系
+    "french", "parisian", "cream", "neutral", "elegant",
+    # 工业风
+    "industrial", "loft", "exposed brick",
+    # 自然系
+    "earthy", "natural", "rattan", "linen", "marble",
+    # 现代轻奢
+    "modern luxury", "contemporary", "modern",
+    # 小户型相关
+    "small space", "studio apartment", "tiny", "renovation", "makeover", "before and after",
+]
+
+# ---- 排除关键词（黑名单）----
+# 标题含有这些词的帖子会被直接过滤掉
+EXCLUDE_KEYWORDS = [
+    # 商业/广告内容
+    "sponsored", "ad ", " ad", "[ad]", "affiliate",
+    "giveaway", "discount", "coupon", "promo",
+    "buy now", "shop now", "limited time", "sale",
+    "use code", "link in bio",
+    
+    # 非家装内容
+    "meme", "memes", "funny",
+    "rate my", "roast my",
+    "help me choose", "what color",
+    "where to buy", "where can i find",
+    "id on", "id request",
+    
+    # 版务/公告
+    "megathread", "announcement", "rules",
+    "modpost", "mod post", "meta",
+    "survey", "census",
+]
+
+# ---- 推送设置 ----
 HISTORY_FILE = Path(__file__).parent.parent / "data" / "sent_history.json"
-MAX_POSTS_PER_RUN = 15
+MAX_POSTS_PER_RUN = 15  # 每次最多推多少条
+
+# ============================================================
+# 过滤逻辑
+# ============================================================
+
+def matches_style_filter(title, content=""):
+    """检查是否匹配风格关键词（仅对Reddit生效）"""
+    text = (title + " " + content).lower()
+    return any(kw.lower() in text for kw in STYLE_KEYWORDS)
+
+
+def matches_exclude_filter(title):
+    """检查是否命中排除关键词（所有源生效）"""
+    title_lower = title.lower()
+    return any(kw.lower() in title_lower for kw in EXCLUDE_KEYWORDS)
+
+
+def filter_posts(posts, source_type):
+    """应用过滤规则。source_type: 'reddit' 或 'blog'"""
+    original_count = len(posts)
+    
+    # 所有源：排除黑名单内容
+    posts = [p for p in posts if not matches_exclude_filter(p["title"])]
+    excluded = original_count - len(posts)
+    
+    # 仅Reddit：风格关键词白名单过滤
+    style_filtered = 0
+    if source_type == "reddit" and STYLE_FILTER_REDDIT_ONLY:
+        before_style = len(posts)
+        posts = [p for p in posts if matches_style_filter(p["title"])]
+        style_filtered = before_style - len(posts)
+    
+    if excluded > 0:
+        print(f"  ⊘ 排除 {excluded} 条（商业/无关内容）")
+    if style_filtered > 0:
+        print(f"  ⊘ 过滤 {style_filtered} 条（不匹配风格关键词）")
+    
+    return posts
+
 
 # ============================================================
 # 工具函数
@@ -77,7 +166,7 @@ def save_history(history):
 
 
 def fetch_rss(url):
-    """用浏览器UA获取RSS，避免被封"""
+    """用浏览器UA获取RSS"""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -89,8 +178,7 @@ def fetch_rss(url):
             raw = response.read()
             return feedparser.parse(raw)
     except Exception as e:
-        print(f"  ✗ RSS请求失败 ({url}): {e}")
-        # 回退：让feedparser自己请求
+        print(f"  ✗ RSS请求失败: {e}")
         try:
             return feedparser.parse(url)
         except Exception as e2:
@@ -114,7 +202,7 @@ def extract_images_from_html(html):
         matches = re.findall(pattern, html, re.IGNORECASE)
         for url in matches:
             clean = url.split("?")[0] if "redd.it" in url else url
-            if any(skip in clean.lower() for skip in ['icon', 'logo', 'button', 'avatar', 'emoji']):
+            if any(skip in clean.lower() for skip in ['icon', 'logo', 'button', 'avatar', 'emoji', 'flair']):
                 continue
             if clean not in images:
                 images.append(clean)
@@ -123,7 +211,7 @@ def extract_images_from_html(html):
 
 
 def fetch_reddit_posts(feed_config):
-    """通过RSS获取Reddit帖子"""
+    """通过RSS获取Reddit帖子（使用/top/排序保证质量）"""
     posts = []
     feed = fetch_rss(feed_config["url"])
     
@@ -134,8 +222,6 @@ def fetch_reddit_posts(feed_config):
     
     for entry in feed.entries:
         title = entry.get("title", "")
-        if any(skip in title.lower() for skip in ['megathread', 'announcement', 'rules', 'modpost']):
-            continue
         
         content = ""
         if entry.get("content"):
@@ -201,7 +287,6 @@ def fetch_blog_posts(feed_config):
 # ============================================================
 
 def telegram_request(method, data):
-    """统一的Telegram API请求"""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/{method}"
     payload = json.dumps(data).encode("utf-8")
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
@@ -297,20 +382,19 @@ def main():
         print("❌ 错误：请设置 TELEGRAM_BOT_TOKEN 和 TELEGRAM_CHAT_ID 环境变量")
         return
     
-    # 调试信息
-    token_preview = TELEGRAM_BOT_TOKEN[:10] if len(TELEGRAM_BOT_TOKEN) > 10 else "TOO_SHORT"
-    print(f"🔑 Bot Token: {token_preview}...（前10位）")
-    print(f"💬 Chat ID: {TELEGRAM_CHAT_ID}")
-    print(f"🔑 Token长度: {len(TELEGRAM_BOT_TOKEN)} 字符\n")
+    # 打印当前过滤配置
+    print("⚙️  当前过滤配置：")
+    print(f"   风格关键词过滤: ✓ 开启（仅Reddit，{len(STYLE_KEYWORDS)}个关键词）")
+    print(f"   广告排除: ✓ 开启（{len(EXCLUDE_KEYWORDS)}个排除词）")
+    print(f"   博客源: 全量推送（不做关键词过滤）")
+    print(f"   Reddit排序: /top/（按热度）")
+    print(f"   每次最多推送: {MAX_POSTS_PER_RUN} 条\n")
     
-    # 测试Telegram连接
+    # 测试Telegram
     print("📡 测试Telegram连接...")
-    test = send_message("🔧 连接测试成功！脚本开始运行...")
+    test = send_message("🔧 连接测试成功！开始抓取...")
     if not test or not test.get("ok"):
-        print("❌ Telegram连接失败！请检查：")
-        print("   1. TELEGRAM_BOT_TOKEN 是否正确（无多余空格/换行）")
-        print("   2. TELEGRAM_CHAT_ID 是否正确")
-        print("   3. 你是否已经在Telegram里给bot发过消息（点了Start）")
+        print("❌ Telegram连接失败")
         return
     print("  ✓ Telegram连接正常\n")
     
@@ -329,13 +413,24 @@ def main():
         else:
             posts = fetch_blog_posts(feed)
         
-        print(f"  ✓ 获取 {len(posts)} 条（含图片）")
+        print(f"  ✓ 抓取 {len(posts)} 条（含图片）")
+        
+        # 应用过滤规则
+        posts = filter_posts(posts, feed["type"])
+        print(f"  ✓ 过滤后 {len(posts)} 条")
+        
         all_posts.extend(posts)
         time.sleep(2)
     
     # 去重
     new_posts = [p for p in all_posts if p["id"] not in history]
-    print(f"\n📊 汇总：共 {len(all_posts)} 条，新内容 {len(new_posts)} 条\n")
+    
+    print(f"\n{'='*50}")
+    print(f"📊 汇总")
+    print(f"   抓取总数: {len(all_posts)} 条")
+    print(f"   新内容: {len(new_posts)} 条")
+    print(f"   将推送: {min(len(new_posts), MAX_POSTS_PER_RUN)} 条")
+    print(f"{'='*50}\n")
     
     if not new_posts:
         print("✅ 没有新内容，结束")
@@ -353,6 +448,9 @@ def main():
     summary = f"🏠 <b>今日家装素材 - {len(to_send)}条新内容</b>\n\n"
     for src, count in source_counts.items():
         summary += f"  • {src}: {count}条\n"
+    summary += f"\n⚙️ 过滤: 排除广告"
+    if STYLE_FILTER_REDDIT_ONLY:
+        summary += " + 风格关键词匹配"
     
     send_message(summary)
     time.sleep(1)
@@ -368,7 +466,6 @@ def main():
         result = send_media_group(images, caption) if images else send_message(caption)
         
         if result:
-            # sendMediaGroup成功时返回的result可能是ok:true或者是list
             success = result.get("ok", False) if isinstance(result, dict) else True
             if success or isinstance(result, dict):
                 history[post["id"]] = {
