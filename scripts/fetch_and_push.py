@@ -25,6 +25,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 # Reddit用 /top/ 而不是默认的 /hot/，这样拿到的都是高赞内容
 # t=day 表示过去24小时的top帖，t=week 表示过去一周
 RSS_FEEDS = [
+    # ---- Reddit ----
     {
         "name": "RoomPorn",
         "url": "https://www.reddit.com/r/RoomPorn/top/.rss?t=day&limit=25",
@@ -45,20 +46,45 @@ RSS_FEEDS = [
         "url": "https://www.reddit.com/r/AmateurRoomPorn/top/.rss?t=day&limit=25",
         "type": "reddit"
     },
-    {
-        "name": "Dezeen Interiors",
-        "url": "https://www.dezeen.com/interiors/feed/",
-        "type": "blog"
-    },
+    # ---- 博客 ----
     {
         "name": "Apartment Therapy",
         "url": "https://www.apartmenttherapy.com/main.rss",
         "type": "blog"
     },
+    {
+        "name": "Yellowtrace",
+        "url": "https://www.yellowtrace.com.au/feed/",
+        "type": "blog"
+    },
+    {
+        "name": "Design Milk",
+        "url": "https://design-milk.com/feed/",
+        "type": "blog"
+    },
+    {
+        "name": "Remodelista",
+        "url": "https://www.remodelista.com/rss",
+        "type": "blog"
+    },
+    {
+        "name": "The Nordroom",
+        "url": "https://www.thenordroom.com/feed/",
+        "type": "blog"
+    },
+    {
+        "name": "My Scandinavian Home",
+        "url": "https://www.myscandinavianhome.com/feeds/posts/default?alt=rss",
+        "type": "blog"
+    },
+    {
+        "name": "COCO LAPINE DESIGN",
+        "url": "https://cocolapinedesign.com/feed/",
+        "type": "blog"
+    },
 ]
 
 # ---- 风格关键词过滤（白名单模式，仅对Reddit生效）----
-STYLE_FILTER_REDDIT_ONLY = True  # 只对Reddit源做关键词过滤，博客源全量推送
 
 STYLE_KEYWORDS = [
     # 北欧/极简系
@@ -103,9 +129,23 @@ EXCLUDE_KEYWORDS = [
     "survey", "census",
 ]
 
+# ---- 商业空间排除（仅对博客源生效）----
+# 博客源标题含这些词的跳过，聚焦住宅室内设计
+COMMERCIAL_KEYWORDS = [
+    "restaurant", "bar ", " bar", "hotel", "office",
+    "store", "shop ", " shop", "museum", "gallery",
+    "spa ", " spa", "café", "cafe", "showroom",
+    "exhibition", "retail", "workspace", "co-working",
+    "coworking", "pavilion", "installation",
+    "church", "library", "school", "hospital",
+    "airport", "station", "theater", "theatre",
+    "cinema", "nightclub", "club ", " club",
+    "brewery", "winery", "distillery",
+]
+
 # ---- 推送设置 ----
 HISTORY_FILE = Path(__file__).parent.parent / "data" / "sent_history.json"
-MAX_POSTS_PER_RUN = 15  # 每次最多推多少条
+MAX_POSTS_PER_RUN = 20  # 每次最多推多少条
 
 # ============================================================
 # 过滤逻辑
@@ -123,6 +163,12 @@ def matches_exclude_filter(title):
     return any(kw.lower() in title_lower for kw in EXCLUDE_KEYWORDS)
 
 
+def matches_commercial_filter(title):
+    """检查是否命中商业空间关键词（仅对博客源生效）"""
+    title_lower = title.lower()
+    return any(kw.lower() in title_lower for kw in COMMERCIAL_KEYWORDS)
+
+
 def filter_posts(posts, source_type):
     """应用过滤规则。source_type: 'reddit' 或 'blog'"""
     original_count = len(posts)
@@ -133,15 +179,24 @@ def filter_posts(posts, source_type):
     
     # 仅Reddit：风格关键词白名单过滤
     style_filtered = 0
-    if source_type == "reddit" and STYLE_FILTER_REDDIT_ONLY:
+    if source_type == "reddit":
         before_style = len(posts)
         posts = [p for p in posts if matches_style_filter(p["title"])]
         style_filtered = before_style - len(posts)
     
+    # 仅博客：排除商业空间
+    commercial_filtered = 0
+    if source_type == "blog":
+        before_commercial = len(posts)
+        posts = [p for p in posts if not matches_commercial_filter(p["title"])]
+        commercial_filtered = before_commercial - len(posts)
+    
     if excluded > 0:
-        print(f"  ⊘ 排除 {excluded} 条（商业/无关内容）")
+        print(f"  ⊘ 排除 {excluded} 条（广告/无关内容）")
     if style_filtered > 0:
         print(f"  ⊘ 过滤 {style_filtered} 条（不匹配风格关键词）")
+    if commercial_filtered > 0:
+        print(f"  ⊘ 排除 {commercial_filtered} 条（商业空间）")
     
     return posts
 
@@ -386,8 +441,9 @@ def main():
     print("⚙️  当前过滤配置：")
     print(f"   风格关键词过滤: ✓ 开启（仅Reddit，{len(STYLE_KEYWORDS)}个关键词）")
     print(f"   广告排除: ✓ 开启（{len(EXCLUDE_KEYWORDS)}个排除词）")
-    print(f"   博客源: 全量推送（不做关键词过滤）")
+    print(f"   商业空间排除: ✓ 开启（仅博客，{len(COMMERCIAL_KEYWORDS)}个排除词）")
     print(f"   Reddit排序: /top/（按热度）")
+    print(f"   内容源: {len(RSS_FEEDS)} 个（{sum(1 for f in RSS_FEEDS if f['type']=='reddit')} Reddit + {sum(1 for f in RSS_FEEDS if f['type']=='blog')} 博客）")
     print(f"   每次最多推送: {MAX_POSTS_PER_RUN} 条\n")
     
     # 测试Telegram
@@ -448,9 +504,7 @@ def main():
     summary = f"🏠 <b>今日家装素材 - {len(to_send)}条新内容</b>\n\n"
     for src, count in source_counts.items():
         summary += f"  • {src}: {count}条\n"
-    summary += f"\n⚙️ 过滤: 排除广告"
-    if STYLE_FILTER_REDDIT_ONLY:
-        summary += " + 风格关键词匹配"
+    summary += f"\n⚙️ 过滤: 广告排除 + Reddit风格关键词 + 博客商业空间排除"
     
     send_message(summary)
     time.sleep(1)
