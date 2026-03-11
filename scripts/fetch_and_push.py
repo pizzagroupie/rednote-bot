@@ -57,12 +57,7 @@ RSS_FEEDS = [
         "url": "https://www.yellowtrace.com.au/feed/",
         "type": "blog"
     },
-    {
-        "name": "Design Milk",
-        "url": "https://design-milk.com/feed/",
-        "type": "blog"
-    },
-    {
+       {
         "name": "Remodelista",
         "url": "https://www.remodelista.com/rss",
         "type": "blog"
