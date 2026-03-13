@@ -28,22 +28,22 @@ RSS_FEEDS = [
     # ---- Reddit ----
     {
         "name": "RoomPorn",
-        "url": "https://www.reddit.com/r/RoomPorn/top/.rss?t=day&limit=25",
+        "url": "https://www.reddit.com/r/RoomPorn/top/.rss?t=year&limit=25",
         "type": "reddit"
     },
     {
         "name": "CozyPlaces",
-        "url": "https://www.reddit.com/r/CozyPlaces/top/.rss?t=day&limit=25",
+        "url": "https://www.reddit.com/r/CozyPlaces/top/.rss?t=year&limit=25",
         "type": "reddit"
     },
     {
         "name": "InteriorDesign",
-        "url": "https://www.reddit.com/r/InteriorDesign/top/.rss?t=day&limit=25",
+        "url": "https://www.reddit.com/r/InteriorDesign/top/.rss?t=year&limit=25",
         "type": "reddit"
     },
     {
         "name": "AmateurRoomPorn",
-        "url": "https://www.reddit.com/r/AmateurRoomPorn/top/.rss?t=day&limit=25",
+        "url": "https://www.reddit.com/r/AmateurRoomPorn/top/.rss?t=year&limit=25",
         "type": "reddit"
     },
     # ---- 博客 ----
@@ -57,7 +57,7 @@ RSS_FEEDS = [
         "url": "https://www.yellowtrace.com.au/feed/",
         "type": "blog"
     },
-       {
+    {
         "name": "Remodelista",
         "url": "https://www.remodelista.com/rss",
         "type": "blog"
@@ -78,6 +78,8 @@ RSS_FEEDS = [
         "type": "blog"
     },
 ]
+
+# Dezeen已删除 — 内容偏建筑/商业空间，不适合小红书家装方向
 
 # ---- 风格关键词过滤（白名单模式，仅对Reddit生效）----
 
